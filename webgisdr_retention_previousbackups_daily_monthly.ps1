@@ -26,7 +26,7 @@
 
     #### a.) Archive the log file so a new one can be created for the next run to properly monitor for errors
         ## 1.) Check if the archive folder exists, if not, create it
-        ## 2.) Create a timestamped archive filename
+        ## 2.) Create a timestamped archive filename with the original file name and extension appended with the current date and time if the log file exists
         ## 3.) Move the log file to the archive
 
 ##### 3. Runs the WebGIS DR process using a batch file after the log file has been archived.
@@ -207,7 +207,7 @@ try {
     }
 
     if (Test-Path $logFilePath) {
-        ### 2a2.) Create a timestamped archive filename
+        ### 2a2.) Create a timestamped archive filename with the original file name and extension appended with the current date and time if the log file exists (e.g., webgisdr_2021-09-30_123456.log)
         $timestamp = Get-Date -Format "yyyy-MM-dd_HHmmss" # Get the current date and time
         $logFileName = [System.IO.Path]::GetFileNameWithoutExtension($logFilePath) # Ensure you retrieve the log file name
         $logFileExtension = [System.IO.Path]::GetExtension($logFilePath) # Ensure you retrieve the log file extension

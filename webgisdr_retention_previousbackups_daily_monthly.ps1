@@ -2,7 +2,7 @@
 # 2024
 
 ############################################################################################################
-# Documentation
+# Start Documentation.
 ############################################################################################################
 
 # This script accomplishes multiple tasks. Each of these tasks is broken down into smaller steps to ensure the script is easy to understand and maintain. The script is well-commented to explain each step and the purpose of the code. The script is designed to be run as a scheduled task to automate the WebGIS DR backup retention process. You can reference each of the tasks via their number and letter within the script to understand the flow and purpose of each section.
@@ -36,22 +36,20 @@
 ##### 4. Set up email notifications for alerting if things go wrong with the WebGIS DR process.
 
     #### a.) If the log file is missing, send an email
-        ## 1.) Setup SMTP client for sending email
-        ## 2.) Create and send the email message
+        ## 1.) Create and send the email message
     #### b.) If there is an error in the log file, send an email
-        ## 1.) Setup SMTP client for sending email
-        ## 2.) Create and send the email message
+        ## 1.) Create and send the email message
 
 ############################################################################################################
-# End Documentation
-############################################################################################################
-
-############################################################################################################
-# Start Script
+# End Documentation.
 ############################################################################################################
 
 ############################################################################################################
-# Start Transcription
+# Start Script.
+############################################################################################################
+
+############################################################################################################
+# Start Transcription.
 ############################################################################################################
 
 ## Start the transcript at the beginning of your script
@@ -59,7 +57,7 @@ $transcriptPath = "C:\webgisdr\retention_script_transcript.log"
 Start-Transcript -Path $transcriptPath -Append
 
 ############################################################################################################
-## Start Variables
+## Start Variables.
 ############################################################################################################
 
 # Backup and retention variables
@@ -71,15 +69,27 @@ $days = 2  # Number of days to retain daily backups
 $months = 4 # Number of months to retain monthly backups
 
 # ArcGIS Enterprise variable
-$environment = "gis.company.com" # Name of the ArcGIS Enterprise Environment being backed up (e.g., gis.company.com)
+$environment = "gis.company.com" # Name of the ArcGIS Enterprise Environment being backed up that will be used in the email subject (e.g., gis.company.com)
 
-# Email variables
+# Email variables for sending notifications (if using ssl and/or authentication for your SMTP server you can set the $useSSL & $useAuthentication variables to $true and provide the username and password for authentication)
 $smtpServer = "your.smtp.server.com" # Your SMTP server address (e.g., smtp.gmail.com)
 $smtpPort = 25 # or 587/465 depending on your server settings
-$smtpUser = "yourEmail@example.com" # Your SMTP username (if needed)
-$smtpPassword = "yourPassword" # Your SMTP password (if needed)
+$useSSL = $false # Set to $true if your SMTP server requires SSL
+$useAuthentication = $false # Set to $true if your SMTP server requires authentication
+$smtpUser = "" # Your SMTP username (leave blank if not needed)
+$smtpPassword = "" # Your SMTP password (leave blank if not needed)
 $fromEmail = "fromEmail@example.com" # Your email address
 $toEmail = "toEmail@example.com" # Recipient email address
+
+# Initialize SMTP client for sending emails 
+$smtpClient = New-Object Net.Mail.SmtpClient($smtpServer, $smtpPort)
+$smtpClient.EnableSsl = $useSSL
+if ($useAuthentication -and $smtpUser -ne "" -and $smtpPassword -ne "") {
+    $smtpClient.Credentials = New-Object System.Net.NetworkCredential($smtpUser, $smtpPassword)
+} else {
+    $smtpClient.UseDefaultCredentials = $false
+}
+
 
 # Email variables
 $errorLogFileSubject = "WebGIS DR Process FAILED for the $environment environment" # Email subject
@@ -95,9 +105,8 @@ $logFileName = [System.IO.Path]::GetFileNameWithoutExtension($logFilePath) # Get
 $logFileExtension = [System.IO.Path]::GetExtension($logFilePath) # Get the log file extension
 
 ############################################################################################################
-## End Variables
+## End Variables.
 ############################################################################################################
-
 
 ############################################################################################################
 ##### Start 1.) Organizes WebGIS DR backup files moving them into Daily and Monthly folders while deleting previous backups older than the specified number of days and months in their respective backup folders to properly retain WebGIS DR backups.
@@ -106,45 +115,65 @@ $logFileExtension = [System.IO.Path]::GetExtension($logFilePath) # Get the log f
 #### 1a.) Move WebGIS DR backup files to Daily and Monthly folders based on the $days and $months variables and remove backups older than the specified number of days and months in their respective backup folders to properly retain WebGIS DR backups
 Write-Host "Starting backup organization and cleanup process..."
 
-### 1a1.) Calculate cut-off dates for daily and monthly retention
-$cutOffDateDaily = (Get-Date).AddDays(-$days) # Calculate the cut-off date for daily retention
-$cutOffDateMonthly = (Get-Date).AddMonths(-$months).Date # Calculate the cut-off date for monthly retention
+$operationSuccessful = $false # Initialize the success flag to false to track if the process completes successfully, this will be used to skip the removal of all files from the backup directory if an error occurs during the process
 
-### 1a2.) Process backup files
-## 1a2a.) Gets all files in the backup directory and loops through each file
-Get-ChildItem -Path $backupDirectory -File | ForEach-Object { # Loop through each file in the backup directory
-    $fileName = $_.Name # Get the file name
-    $fileDateStr = $fileName.Split("-")[0] # Extract the date part from the file name
-    $fileDate = [datetime]::ParseExact($fileDateStr, "yyyyMMdd", $null) # Parse the date string to a datetime object
-
-    ## 1a2b.) Check if file is the first of the month and within $months
-    if ($fileDate.Day -eq 1 -and $fileDate -ge $cutOffDateMonthly) {
-        # 1a2b1.) Check if a file for this month already exists in Monthly
-        $monthlyFile = Get-ChildItem -Path $monthlyBackups -File | Where-Object {
-            $_.Name -match "^$($fileDate.ToString('yyyyMM'))" # Match the file name with the current month
-        }
-        # 1a2b2.) If no file for this month exists in Monthly, copy it to the Monthly folder
-        if (-not $monthlyFile) {
-            Copy-Item -Path $_.FullName -Destination $monthlyBackups -ErrorAction SilentlyContinue
-        }
-    }
-
-    ## 1a2c.) Move files to Daily if within $days
-    if ($fileDate -ge $cutOffDateDaily) {
-        Move-Item -Path $_.FullName -Destination $dailyBackups -ErrorAction SilentlyContinue
-    }
-}
-
-### 1a3.) Remove all files from the backup directory
 try {
-    Get-ChildItem -Path $backupDirectory -File | Remove-Item -Force -ErrorAction Stop
-    Write-Host "All backups removed from the backup directory successfully."
+    ### 1a1.) Calculate cut-off dates for daily and monthly retention
+    $cutOffDateDaily = (Get-Date).AddDays(-$days) # Calculate the cut-off date for daily retention
+    $cutOffDateMonthly = (Get-Date).AddMonths(-$months).Date # Calculate the cut-off date for monthly retention
+
+    ### 1a2.) Process backup files
+    
+    ## 1a2a.) Gets all files in the backup directory and loops through each file
+    Get-ChildItem -Path $backupDirectory -File | ForEach-Object { # Loop through each file in the backup directory
+        $fileName = $_.Name # Get the file name
+        $fileDateStr = $fileName.Split("-")[0] # Extract the date part from the file name
+        $fileDate = [datetime]::ParseExact($fileDateStr, "yyyyMMdd", $null) # Parse the date string to a datetime object
+
+        ## 1a2b.) Check if file is the first of the month and within $months
+        if ($fileDate.Day -eq 1 -and $fileDate -ge $cutOffDateMonthly) {
+            # 1a2b1.) Check if a file for this month already exists in Monthly
+            $monthlyFile = Get-ChildItem -Path $monthlyBackups -File | Where-Object {
+                $_.Name -match "^$($fileDate.ToString('yyyyMM'))" # Match the file name with the current month
+            }
+            # 1a2b2.) If no file for this month exists in Monthly, copy it to the Monthly folder. Uses copy instead of move to allow the daily retention to be processed after the monthly retention. After these operations are completed successfully, all of the backup files will be removed from the backup directory.
+            if (-not $monthlyFile) {
+                Copy-Item -Path $_.FullName -Destination $monthlyBackups -ErrorAction SilentlyContinue -ErrorVariable copyErrorMonth
+                if ($copyErrorMonth) {
+                    # Log or handle the error
+                    Write-Host "Error copying file $($_.FullName) to '$monthlyBackups': $($copyErrorMonth.Exception.Message)"
+                }
+            }
+        }
+
+        ## 1a2c.) Move files to Daily if within $days
+        if ($fileDate -ge $cutOffDateDaily) {
+            Move-Item -Path $_.FullName -Destination $dailyBackups -ErrorAction SilentlyContinue -ErrorVariable copyErrorDaily
+            if ($copyErrorDaily) {
+                # Log or handle the error
+                Write-Host "Error moving file $($_.FullName) to '$dailyBackups': $($copyErrorDaily.Exception.Message)"
+            }
+        }
+    }
+    $operationSuccessful = $true # Set the success flag to true if the above block completes successfully to allow the removal of all files from the backup directory in the next step
 } catch {
-    Write-Host "An error occurred while removing backups: $_"
+    Write-Host "An error occurred during steps #1a1 - #1a2: Calculate cut-off dates for daily and monthly retention or processing the backup files - $_"
 }
 
-### 1a4.) Cleanup Daily folder
+if ($operationSuccessful) {
+    try {
+        ### 1a3.) Remove all files from the backup directory if the previous steps completed successfully based on the success flag
+        Get-ChildItem -Path $backupDirectory -File | Remove-Item -Force -ErrorAction Stop
+        Write-Host "All backups removed from the backup directory successfully."
+    } catch {
+        Write-Host "An error occurred during step #1a3: Remove all files from the backup directory - $_"
+    }
+} else {
+    Write-Host "Skipping removal of all files from the backup directory due to previous errors, please review and fix any necessary errors."
+}
+
 try{ 
+    ### 1a4.) Cleanup Daily folder
     Get-ChildItem -Path $dailyBackups -File | Where-Object { # Get all files in the Daily folder
         $fileName = $_.Name # Get the file name
         $fileDateStr = $fileName.Split("-")[0] # Extract the date part from the file name
@@ -153,11 +182,11 @@ try{
     } | Remove-Item -Force -ErrorAction Stop # Remove files older than the cut-off date
     Write-Host "Old daily backups removed successfully."
 } catch {
-    Write-Host "An error occurred while removing old daily backups: $_"
+    Write-Host "An error occurred while during step #1a4: Cleanup Daily folder - $_"
 }
 
-### 1a5.) Cleanup Monthly folder
 try {
+    ### 1a5.) Cleanup Monthly folder
     Get-ChildItem -Path $monthlyBackups -File | Where-Object { # Get all files in the Monthly folder
         $fileName = $_.Name # Get the file name
         $fileDateStr = $fileName.Split("-")[0] # Extract the date part from the file name
@@ -166,7 +195,7 @@ try {
     } | Remove-Item -Force -ErrorAction Stop # Remove files older than the cut-off date
     Write-Host "Old monthly backups removed successfully."
 } catch {
-    Write-Host "An error occurred while removing old monthly backups: $_"
+    Write-Host "An error occurred during step #1a5: Cleanup Monthly folder - $_"
 }
 
 Write-Host "Backup organization and cleanup process completed."
@@ -180,20 +209,25 @@ Write-Host "Backup organization and cleanup process completed."
 ############################################################################################################
 
 #### 2a.) Archive the log file so a new one can be created for the next run to properly monitor for errors
-if (Test-Path $logFilePath) {
+try {
     ### 2a1.) Check if the archive folder exists, if not, create it
-    if (-not (Test-Path $archiveFolderPath)) {
-        New-Item -ItemType Directory -Path $archiveFolderPath # Create the archive folder if it doesn't exist
+    if (Test-Path $logFilePath) {
+        if (-not (Test-Path $archiveFolderPath)) {
+            New-Item -ItemType Directory -Path $archiveFolderPath # Create the archive folder if it doesn't exist
+        }
+
+        ### 2a2.) Create a timestamped archive filename
+        $timestamp = Get-Date -Format "yyyy-MM-dd_HHmmss" # Get the current date and time
+        $archivedLogFileName = "$logFileName" + "_" + $timestamp + "$logFileExtension" # Create the archive file name with timestamp appended to the original file name (e.g., webgisdr_2021-09-30_123456.log)
+        $archivedLogFilePath = Join-Path $archiveFolderPath $archivedLogFileName # Create the full path to the archive file
+
+        ### 2a3.) Move the log file to the archive
+        Move-Item -Path $logFilePath -Destination $archivedLogFilePath
     }
-
-    ### 2a2.) Create a timestamped archive filename
-    $timestamp = Get-Date -Format "yyyy-MM-dd_HHmmss" # Get the current date and time
-    $archivedLogFileName = "$logFileName" + "_" + $timestamp + "$logFileExtension" # Create the archive file name with timestamp appended to the original file name (e.g., webgisdr_2021-09-30_123456.log)
-    $archivedLogFilePath = Join-Path $archiveFolderPath $archivedLogFileName # Create the full path to the archive file
-
-    ### 2a3.) Move the log file to the archive
-    Move-Item -Path $logFilePath -Destination $archivedLogFilePath
+} catch {
+    Write-Host "An error occurred during step #2a: Archive the log file so a new one can be created for the next run to properly monitor for errors - : $_"
 }
+
 
 ############################################################################################################
 ##### End 2.) Archives the previous days WebGIS DR log files into an archive folder so the WebGIS DR process can create a new log that will be monitored for errors or issues and sends an email notification if something goes wrong with the backup process.
@@ -203,8 +237,13 @@ if (Test-Path $logFilePath) {
 ##### Start 3.) Runs the WebGIS DR process using a batch file after the log file has been archived.
 ############################################################################################################
 
-#### 3a.) Run the bat file after the log file has been archived
-Start-Process -FilePath $batFile -Wait
+try {
+    #### 3a.) Run the bat file after the log file has been archived
+    Start-Process -FilePath $batFile -Wait
+} catch {
+    Write-Host "An error occurred during step #3a: Run the bat file after the log file has been archived - $_"
+}
+
 
 ############################################################################################################
 ##### End 3.) Runs the WebGIS DR process using a batch file after the log file has been archived.
@@ -214,48 +253,44 @@ Start-Process -FilePath $batFile -Wait
 ##### Start 4.) Set up email notifications for alerting if things go wrong with the WebGIS DR process.
 ############################################################################################################
 
-#### 4a.) If the log file is missing, send an email
-if (-not (Test-Path $logFilePath)) {
-    ### 4a1.) Setup SMTP client for sending email
-    $smtpClient = New-Object Net.Mail.SmtpClient($smtpServer, $smtpPort) # Create SMTP client
-    $smtpClient.EnableSsl = $false # (Set to $true if your SMTP Server uses SSL)
-    $smtpClient.Credentials = New-Object System.Net.NetworkCredential($smtpUser, $smtpPassword) # Set credentials (if needed)
 
-    ### 4a2.) Create and send the email message
-    $missingLogMailMessage = New-Object System.Net.Mail.MailMessage
-    $missingLogMailMessage.From = $fromEmail
-    $missingLogMailMessage.To.Add($toEmail)
-    $missingLogMailMessage.Subject = $missingLogFileSubject
-    $missingLogMailMessage.Body = $missingLogFileBody
-    $smtpClient.Send($missingLogMailMessage)
-
-## 4b.) If there is an error in the log file, send an email
-} elseif (Select-String -Path $logFilePath -Pattern "ERROR") {
-    ### 4b1.) Setup SMTP client for sending email
-    $smtpClient = New-Object Net.Mail.SmtpClient($smtpServer, $smtpPort) # Create SMTP client
-    $smtpClient.EnableSsl = $false # (Set to $true if your SMTP Server uses SSL)
-    $smtpClient.Credentials = New-Object System.Net.NetworkCredential($smtpUser, $smtpPassword) # Set credentials (if needed)
-    
-    ### 4b2.) Create and send the email message
-    $mailMessage = New-Object System.Net.Mail.MailMessage # Create email message object
-    $mailMessage.From = $fromEmail # Set sender email address
-    $mailMessage.To.Add($toEmail) # Add recipient email address
-    $mailMessage.Subject = $errorLogFileSubject # Set email subject
-    $mailMessage.Body = $errorLogFileBody # Set email body
-    $smtpClient.Send($mailMessage)
+try {
+    #### 4a.) If the log file is missing, send an email
+    if (-not (Test-Path $logFilePath)) { # Check if the log file exists
+        ### 4a1.) Create and send the email message
+        $missingLogMailMessage = New-Object System.Net.Mail.MailMessage # Create a new mail message
+        $missingLogMailMessage.From = $fromEmail # Set the from email address
+        $missingLogMailMessage.To.Add($toEmail) # Add the recipient email address
+        $missingLogMailMessage.Subject = $missingLogFileSubject # Set the email subject
+        $missingLogMailMessage.Body = $missingLogFileBody # Set the email body
+        $smtpClient.Send($missingLogMailMessage) # Send the email
+    }
+    #### 4b.) If there is an error in the log file, send an email
+    elseif (Select-String -Path $logFilePath -Pattern "ERROR") { # Check if the log file contains the word "ERROR"
+        ### 4b1.) Create and send the email message 
+        $mailMessage = New-Object System.Net.Mail.MailMessage # Create a new mail message
+        $mailMessage.From = $fromEmail # Set the from email address
+        $mailMessage.To.Add($toEmail) # Add the recipient email address
+        $mailMessage.Subject = $errorLogFileSubject # Set the email subject
+        $mailMessage.Body = $errorLogFileBody # Set the email body
+        $smtpClient.Send($mailMessage) # Send the email
+    }
+} catch {
+    Write-Host "An error occurred during step #4a - #4b: Set up email notifications for alerting if things go wrong with the WebGIS DR process - $_"
 }
+
 
 ############################################################################################################
 ##### End 4.) Set up email notifications for alerting if things go wrong with the WebGIS DR process.
 ############################################################################################################
 
 ############################################################################################################
-# End Transcription
+# End Transcription.
 ############################################################################################################
 
 # Stop the transcript at the end of your script
 Stop-Transcript
 
 ############################################################################################################
-# End of Script
+# End Script.
 ############################################################################################################

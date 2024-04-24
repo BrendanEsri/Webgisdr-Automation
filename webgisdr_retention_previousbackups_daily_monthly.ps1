@@ -2,6 +2,21 @@
 # 2024
 
 ############################################################################################################
+# Ideas:
+
+# Set up email notification on a regular basis to report the size of the most recent WebGIS DR file
+
+# Implement incremental backup options in this script
+
+# Write documentation on where to put the webgisdr folder and how to change the log directory
+
+# Implement a way to clean up old log files in the archive folder
+
+############################################################################################################
+
+
+
+############################################################################################################
 # Start Documentation.
 ############################################################################################################
 
